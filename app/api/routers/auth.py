@@ -1,0 +1,139 @@
+from datetime import datetime
+from pydantic import BaseModel
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import RedirectResponse, JSONResponse
+from google_auth_oauthlib.flow import Flow
+from app.core.config import settings
+from app.core.database import get_database
+from app.core.security import create_access_token, create_refresh_token, decode_refresh_token
+from app.core.auth import get_current_user
+import os
+
+router = APIRouter(tags=["Auth"])
+
+# ensure no trailing slash issue
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+SCOPES = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
+REDIRECT_URI = f"{settings.API_BASE_URL}/api/v1/auth/callback"
+
+@router.get("/login")
+async def login():
+    """
+    Initiates the Google OAuth flow.
+    Returns a redirect URL to Google.
+    """
+    # dynamically create flow from env vars
+    client_config = {
+        "web": {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [REDIRECT_URI],
+        }
+    }
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    
+    # store state in session to validate in callback
+    return RedirectResponse(authorization_url)
+
+@router.get("/callback")
+async def callback(request: Request, db = Depends(get_database)):
+    """
+    Handles the callback from Google.
+    Exchanges code for tokens, creates/updates user, and returns JWT.
+    """
+    code = request.query_params.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code")
+
+    client_config = {
+        "web": {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [REDIRECT_URI],
+        }
+    }
+
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # exchange code for token
+    flow.fetch_token(code=code)
+    
+    # get user info
+    session = flow.authorized_session()
+    user_info = session.get('https://www.googleapis.com/oauth2/v2/userinfo').json()
+    
+    user_id = user_info.get("id")
+    email = user_info.get("email")
+    name = user_info.get("name")
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Failed to get user info")
+        
+    # upsert user in db
+    user_data = {
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+        "picture": user_info.get("picture"),
+        "updated_at": datetime.utcnow()
+    }
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": user_data},
+        upsert=True
+    )
+    
+    # create jwt
+    access_token = create_access_token(data={"sub": user_id})
+    refresh_token = create_refresh_token(data={"sub": user_id})
+    
+    # return json with token
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer", "user": user_data}
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+async def refresh_token(request: RefreshTokenRequest):
+    """
+    Refreshes the access token using a valid refresh token.
+    """
+    payload = decode_refresh_token(request.refresh_token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        
+    new_access_token = create_access_token(data={"sub": user_id})
+    return {"access_token": new_access_token, "token_type": "bearer"}
+
+@router.get("/me")
+async def read_users_me(current_user: dict = Depends(get_current_user)):
+    """
+    Get current user details.
+    """
+    if "_id" in current_user:
+        current_user["_id"] = str(current_user["_id"])
+    return current_user

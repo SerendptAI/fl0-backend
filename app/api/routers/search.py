@@ -18,4 +18,5 @@ async def autofill_form(
     """
     user_id = current_user["user_id"]
     results = await vector_service.search_autofill(user_id, request)
+    print(f"[autofill] results: {results}")
     return {"suggestions": results}

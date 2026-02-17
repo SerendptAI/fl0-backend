@@ -21,9 +21,12 @@ class SubmissionSummary(BaseModel):
 
 class AutofillRequest(BaseModel):
     keys: List[str]
-    threshold: float = Field(0.8, ge=0.0, le=1.0, description="Minimum similarity score")
+    threshold: float = Field(0.9, ge=0.0, le=1.0, description="Minimum similarity score")
     multiple: bool = Field(False, description="Return multiple suggestions if true")
     limit: int = Field(3, ge=1, description="Max suggestions per key if multiple is true")
 
 class AutofillResponse(BaseModel):
     suggestions: Dict[str, Union[str, List[str], None]]
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str

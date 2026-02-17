@@ -65,12 +65,21 @@ async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, A
     results = {}
     
     for key in request.keys:
-        # search for the closest semantic match
-        
-        # use query_points
+        # embed the search key locally using fastembed
+        embeddings = list(qdrant_client._embed_documents(
+            documents=[key],
+            embedding_model_name=qdrant_client.embedding_model_name,
+        ))
+        if not embeddings or not embeddings[0]:
+            results[key] = [] if request.multiple else None
+            continue
+
+        query_vector = embeddings[0][1]
+
         search_result = await qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
-            query=key, # pass text directly
+            query=query_vector,
+            using="fast-bge-small-en",
             query_filter=models.Filter(
                 must=[
                     models.FieldCondition(
@@ -80,22 +89,23 @@ async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, A
                 ]
             ),
             limit=request.limit,
-            score_threshold=request.threshold
         )
-        
-        # list of hits
+
         hits = search_result.points
+        for h in hits:
+            print(f"  '{key}' -> '{h.payload.get('original_key')}' = {h.score:.4f}")
+        
+        # filter manually since score_threshold is ignored by fastembed client
+        hits = [h for h in hits if h.score >= request.threshold]
 
         if not hits:
             results[key] = [] if request.multiple else None
             continue
 
         if request.multiple:
-            # return list of suggestions
             suggestions = [hit.payload["value"] for hit in hits]
             results[key] = suggestions
         else:
-            # return single best match
             results[key] = hits[0].payload["value"]
             
     return results

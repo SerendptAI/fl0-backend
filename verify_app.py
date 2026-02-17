@@ -1,10 +1,11 @@
 import streamlit as st
 import requests
-import json
+from app.core.config import settings
 import os
 
 # api configuration
-API_URL = "http://localhost:8001/api/v1"
+API_URL = f"{settings.API_BASE_URL}/api/v1"
+STREAMLIT_URL = "http://localhost:8501"
 
 st.set_page_config(page_title="Semantic Search Verifier", layout="wide")
 st.title("🤖 Semantic Search Backend Verifier")
@@ -14,6 +15,14 @@ if "token" not in st.session_state:
     st.session_state.token = None
 if "user_info" not in st.session_state:
     st.session_state.user_info = None
+
+# auto-capture tokens from redirect query params
+query_params = st.query_params
+if "access_token" in query_params and not st.session_state.token:
+    st.session_state.token = query_params["access_token"]
+    # clear query params from url so tokens aren't visible
+    st.query_params.clear()
+    st.rerun()
 
 # helper: api request wrapper
 def authenticated_request(method, endpoint, **kwargs):
@@ -36,6 +45,9 @@ def authenticated_request(method, endpoint, **kwargs):
         st.error("Could not connect to backend. Is it running on localhost:8001?")
         return None
 
+# build google login url with redirect back to streamlit
+LOGIN_URL = f"{API_URL}/auth/login?redirect_url={STREAMLIT_URL}"
+
 # sidebar: authentication
 with st.sidebar:
     st.header("Authentication")
@@ -44,27 +56,25 @@ with st.sidebar:
         st.warning("Not logged in")
         
         st.markdown(f"""
-        ### Steps to Login:
-        1. [Click here to Login with Google]({API_URL}/auth/login)
-        2. You will be redirected to Google, and then to a results page.
-        3. Copy the `access_token` from the JSON response.
-        4. Paste it below.
+        ### Login
+        [Click here to Login with Google]({LOGIN_URL})
+        
+        You will be redirected to Google and then back here automatically.
         """)
         
-        token_input = st.text_input("Paste Access Token Here", type="password")
-        
-        if st.button("Set Token"):
-            if token_input:
-                st.session_state.token = token_input
-                # Verify token by fetching user info
-                res = authenticated_request("GET", "/auth/me")
-                if res and res.status_code == 200:
-                    st.session_state.user_info = res.json()
-                    st.success(f"Welcome, {st.session_state.user_info.get('name')}!")
+        with st.expander("Or paste a token manually"):
+            token_input = st.text_input("Access Token", type="password")
+            if st.button("Set Token"):
+                if token_input:
+                    st.session_state.token = token_input
                     st.rerun()
-                else:
-                    st.error("Invalid token.")
     else:
+        # fetch user info on first authenticated load
+        if not st.session_state.user_info:
+            res = authenticated_request("GET", "/auth/me")
+            if res and res.status_code == 200:
+                st.session_state.user_info = res.json()
+            
         if st.session_state.user_info:
             st.success(f"Logged in as: {st.session_state.user_info.get('name')}")
             st.caption(f"ID: {st.session_state.user_info.get('user_id')}")

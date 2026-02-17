@@ -1,4 +1,6 @@
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.api.routers import submissions, search, auth
 from contextlib import asynccontextmanager
 
@@ -18,6 +20,8 @@ app = FastAPI(
 app.include_router(submissions.router, prefix="/api/v1/submissions")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
+
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "app" / "static"), name="static")
 
 @app.get("/health", tags=["Health"])
 async def health_check():

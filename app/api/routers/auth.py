@@ -115,14 +115,16 @@ async def callback(request: Request, db = Depends(get_database)):
     access_token = create_access_token(data={"sub": user_id})
     refresh_token = create_refresh_token(data={"sub": user_id})
 
-    # redirect with tokens as query params, or fall back to json
+    # redirect to static success page with the target url encoded
     if redirect_url:
         params = urllib.parse.urlencode({
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
         })
-        return RedirectResponse(url=f"{redirect_url}?{params}")
+        target = f"{redirect_url}?{params}"
+        success_page = f"/static/login_success.html?redirect_url={urllib.parse.quote(target, safe='')}"
+        return RedirectResponse(url=success_page)
 
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer", "user": user_data}
 

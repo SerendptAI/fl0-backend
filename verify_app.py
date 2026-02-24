@@ -29,11 +29,11 @@ def authenticated_request(method, endpoint, **kwargs):
     if not st.session_state.token:
         st.error("Please login first.")
         return None
-        
+
     headers = kwargs.get("headers", {})
     headers["Authorization"] = f"Bearer {st.session_state.token}"
     kwargs["headers"] = headers
-    
+
     try:
         response = requests.request(method, f"{API_URL}{endpoint}", **kwargs)
         if response.status_code == 401:
@@ -51,17 +51,17 @@ LOGIN_URL = f"{API_URL}/auth/login?redirect_url={STREAMLIT_URL}"
 # sidebar: authentication
 with st.sidebar:
     st.header("Authentication")
-    
+
     if not st.session_state.token:
         st.warning("Not logged in")
-        
+
         st.markdown(f"""
         ### Login
         [Click here to Login with Google]({LOGIN_URL})
-        
+
         You will be redirected to Google and then back here automatically.
         """)
-        
+
         with st.expander("Or paste a token manually"):
             token_input = st.text_input("Access Token", type="password")
             if st.button("Set Token"):
@@ -74,11 +74,11 @@ with st.sidebar:
             res = authenticated_request("GET", "/auth/me")
             if res and res.status_code == 200:
                 st.session_state.user_info = res.json()
-            
+
         if st.session_state.user_info:
             st.success(f"Logged in as: {st.session_state.user_info.get('name')}")
             st.caption(f"ID: {st.session_state.user_info.get('user_id')}")
-            
+
         if st.button("Logout"):
             st.session_state.token = None
             st.session_state.user_info = None
@@ -94,23 +94,29 @@ else:
     with tab1:
         st.header("Ingest Form Data")
         st.markdown("Simulate a user submitting a form on a website.")
-        website = st.text_input("Website URL", "https://example.com/careers")
-        
+        website = st.text_input("Website URL", "https://example.com")
+
+        col_path, col_form_id = st.columns(2)
+        with col_path:
+            path = st.text_input("Page Path", "/", help="The path within the website, e.g. /careers/apply")
+        with col_form_id:
+            form_id = st.text_input("Form ID (optional)", "", help="Identify a specific form on the page")
+
         st.subheader("Form Fields")
         if "form_fields" not in st.session_state:
             st.session_state.form_fields = [{"key": "Full Name", "value": "John Doe"}]
-            
+
         for i, field in enumerate(st.session_state.form_fields):
             c1, c2 = st.columns(2)
             with c1:
                 field["key"] = st.text_input(f"Key {i+1}", field["key"], key=f"key_{i}")
             with c2:
                 field["value"] = st.text_input(f"Value {i+1}", field["value"], key=f"val_{i}")
-                
+
         if st.button("+ Add Field"):
             st.session_state.form_fields.append({"key": "", "value": ""})
             st.rerun()
-            
+
         if st.button("Submit Data", type="primary"):
             data_payload = {f["key"]: f["value"] for f in st.session_state.form_fields if f["key"]}
             if not data_payload:
@@ -118,12 +124,15 @@ else:
             else:
                 payload = {
                     "website": website,
+                    "path": path,
                     "data": data_payload
                 }
-                
+                if form_id.strip():
+                    payload["form_id"] = form_id.strip()
+
                 with st.spinner("Ingesting..."):
                     res = authenticated_request("POST", "/submissions/", json=payload)
-                    
+
                 if res and res.status_code == 200:
                     st.success("Data ingested successfully!")
                     st.json(res.json())
@@ -133,7 +142,7 @@ else:
     # tab 2: view submissions
     with tab2:
         st.header("Your Submissions")
-        
+
         col1, col2 = st.columns([3, 1])
         with col2:
             if st.button("Refresh List"):
@@ -145,10 +154,18 @@ else:
 
         if "submissions" in st.session_state and st.session_state.submissions:
             for sub in st.session_state.submissions:
-                with st.expander(f"{sub.get('website', 'Unknown Site')} - {sub.get('timestamp')}"):
+                label = f"{sub.get('website', 'Unknown')}{sub.get('path', '/')}"
+                if sub.get("form_id"):
+                    label += f" (form: {sub['form_id']})"
+                label += f" — {sub.get('timestamp')}"
+
+                with st.expander(label):
                     st.write(f"**ID:** {sub['id']}")
+                    st.write(f"**Path:** {sub.get('path', '/')}")
+                    if sub.get("form_id"):
+                        st.write(f"**Form ID:** {sub['form_id']}")
                     st.caption("Click 'Fetch Full Detail' to see the data.")
-                    
+
                     if st.button(f"Fetch Full Detail {sub['id'][:8]}", key=sub['id']):
                         detail_res = authenticated_request("GET", f"/submissions/{sub['id']}")
                         if detail_res and detail_res.status_code == 200:
@@ -162,21 +179,31 @@ else:
     with tab3:
         st.header("Semantic Autofill Test")
         st.markdown("Simulate visiting a **new** website with different field names.")
-        
-        # Simulating a new form
+
+        # scope filters
+        st.subheader("Scope Filters (optional)")
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            af_website = st.text_input("Filter by Website", "", key="af_website")
+        with fc2:
+            af_path = st.text_input("Filter by Path", "", key="af_path")
+        with fc3:
+            af_form_id = st.text_input("Filter by Form ID", "", key="af_form_id")
+
+        # simulating a new form
         target_keys = st.multiselect(
             "Select fields to autofill",
             ["Name", "Full Name", "Phone", "Mobile Number", "Cell Phone", "Email", "Address", "Role", "Job Title", "Experience", "Years of Exp"],
             default=["Name", "Phone"]
         )
-        
+
         c1, c2 = st.columns(2)
         with c1:
             threshold = st.slider("Similarity Threshold", 0.0, 1.0, 0.8)
         with c2:
             multiple = st.checkbox("Multiple Suggestions?")
             limit = st.number_input("Limit", 1, 10, 3, disabled=not multiple)
-            
+
         if st.button("Autofill", type="primary"):
             if not target_keys:
                 st.error("Select at least one key.")
@@ -187,13 +214,20 @@ else:
                     "multiple": multiple,
                     "limit": limit
                 }
-                
+                if af_website.strip():
+                    req_payload["website"] = af_website.strip()
+                if af_path.strip():
+                    req_payload["path"] = af_path.strip()
+                if af_form_id.strip():
+                    req_payload["form_id"] = af_form_id.strip()
+
                 with st.spinner("Searching..."):
                     res = authenticated_request("POST", "/autofill", json=req_payload)
-                
+
                 if res and res.status_code == 200:
                     suggestions = res.json()["suggestions"]
                     st.subheader("Results")
                     st.json(suggestions)
                 elif res:
                     st.error(f"Error: {res.text}")
+

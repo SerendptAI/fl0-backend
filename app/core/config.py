@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str
     SECRET_KEY: str
     ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int
+    ACCESS_TOKEN_EXPIRE_DAYS: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     API_BASE_URL: str
 

@@ -9,6 +9,14 @@ from uuid import uuid4
 
 router = APIRouter(tags=["Submissions"])
 
+
+def _with_latest(doc: dict) -> dict:
+    """add a 'latest' field holding the last value of each key in data."""
+    data = doc.get("data", {})
+    doc["latest"] = {k: v[-1] if isinstance(v, list) and v else v for k, v in data.items()}
+    return doc
+
+
 @router.post("/", response_model=SubmissionResponse)
 async def ingest_submission(
     submission: SubmissionCreate,
@@ -57,7 +65,7 @@ async def ingest_submission(
     # background vector ingestion (uses original submission data, not merged)
     background_tasks.add_task(vector_service.ingest_submission, user_id, submission)
 
-    return submission_doc
+    return _with_latest(submission_doc)
 
 @router.get("/", response_model=List[SubmissionSummary])
 async def list_submissions(
@@ -92,5 +100,5 @@ async def get_submission_detail(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    return submission
+    return _with_latest(submission)
 

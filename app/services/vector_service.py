@@ -35,12 +35,13 @@ async def ensure_collection():
             ),
         )
 
-    # ensure index exists for filtering
-    await qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="user_id",
-        field_schema="keyword"
-    )
+    # ensure indexes exist for filtering
+    for field in ("user_id", "website", "path", "form_id"):
+        await qdrant_client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name=field,
+            field_schema="keyword",
+        )
 
 
 async def ingest_submission(user_id: str, submission: SubmissionCreate):
@@ -154,6 +155,4 @@ async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, A
             results[key] = [] if request.multiple else None
 
     return results
-
-
 

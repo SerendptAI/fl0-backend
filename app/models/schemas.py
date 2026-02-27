@@ -15,6 +15,7 @@ class SubmissionResponse(BaseModel):
     path: str
     form_id: Optional[str] = None
     data: Dict[str, List[str]]
+    latest: Dict[str, Optional[str]] = {}
     timestamp: datetime
 
 class SubmissionSummary(BaseModel):

@@ -33,10 +33,14 @@ class AutofillRequest(BaseModel):
     form_id: Optional[str] = Field(None, description="Filter suggestions by form id")
     threshold: float = Field(0.8, ge=0.0, le=1.0, description="Minimum similarity score")
     multiple: bool = Field(False, description="Return multiple suggestions if true")
-    limit: int = Field(3, ge=1, description="Max suggestions per key if multiple is true")
+    limit: int = Field(3, ge=1, description="Max websites to return and max suggestions per key if multiple is true")
+
+class WebsiteSuggestion(BaseModel):
+    website: str
+    fields: Dict[str, Union[str, List[str], None]]
 
 class AutofillResponse(BaseModel):
-    suggestions: Dict[str, Union[str, List[str], None]]
+    suggestions: List[WebsiteSuggestion]
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str

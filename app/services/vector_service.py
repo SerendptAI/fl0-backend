@@ -85,15 +85,13 @@ async def ingest_submission(user_id: str, submission: SubmissionCreate):
         logger.warning(f"[vector] ingestion failed (qdrant may be unreachable): {e}")
 
 
-async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, Any]:
+async def search_autofill(user_id: str, request: AutofillRequest) -> List[Dict[str, Any]]:
     try:
         if not await qdrant_client.collection_exists(COLLECTION_NAME):
-            return {key: None for key in request.keys}
+            return []
     except Exception as e:
         logger.warning(f"[vector] qdrant unreachable, returning empty: {e}")
-        return {key: None for key in request.keys}
-
-    results = {}
+        return []
 
     # build filter conditions
     must_conditions = [
@@ -127,13 +125,17 @@ async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, A
 
     query_filter = models.Filter(must=must_conditions)
 
+    # collect all hits across keys, grouped by website
+    # structure: { website: { key: [ (score, value), ... ] } }
+    website_hits: Dict[str, Dict[str, list]] = {}
+
     for key in request.keys:
         try:
             search_result = await qdrant_client.query_points(
                 collection_name=COLLECTION_NAME,
                 query=models.Document(text=key, model=EMBEDDING_MODEL),
                 query_filter=query_filter,
-                limit=request.limit,
+                limit=request.limit * 5,  # fetch extra to cover multiple websites
             )
 
             for h in search_result.points:
@@ -142,17 +144,41 @@ async def search_autofill(user_id: str, request: AutofillRequest) -> Dict[str, A
             # filter by threshold
             hits = [h for h in search_result.points if h.score >= request.threshold]
 
-            if not hits:
-                results[key] = [] if request.multiple else None
-                continue
+            for hit in hits:
+                website = hit.payload.get("website", "unknown")
+                if website not in website_hits:
+                    website_hits[website] = {}
+                if key not in website_hits[website]:
+                    website_hits[website][key] = []
+                website_hits[website][key].append((hit.score, hit.payload["value"]))
 
-            if request.multiple:
-                results[key] = [hit.payload["value"] for hit in hits]
-            else:
-                results[key] = hits[0].payload["value"]
         except Exception as e:
             logger.warning(f"[vector] search failed for key '{key}': {e}")
-            results[key] = [] if request.multiple else None
 
-    return results
+    # sort websites by number of matched keys (descending), then build response
+    sorted_websites = sorted(website_hits.keys(), key=lambda w: len(website_hits[w]), reverse=True)
+
+    # cap number of websites
+    sorted_websites = sorted_websites[:request.limit]
+
+    suggestions = []
+    for website in sorted_websites:
+        fields: Dict[str, Any] = {}
+        for key in request.keys:
+            key_hits = website_hits[website].get(key)
+            if not key_hits:
+                fields[key] = [] if request.multiple else None
+                continue
+
+            # sort by score descending
+            key_hits.sort(key=lambda x: x[0], reverse=True)
+
+            if request.multiple:
+                fields[key] = [val for _, val in key_hits]
+            else:
+                fields[key] = key_hits[0][1]
+
+        suggestions.append({"website": website, "fields": fields})
+
+    return suggestions
 

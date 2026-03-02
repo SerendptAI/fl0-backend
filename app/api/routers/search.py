@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from app.core.auth import get_current_user
-from app.models.schemas import AutofillRequest, AutofillResponse
+from app.models.schemas import AutofillRequest, AutofillResponse, WebsiteSuggestion
 from app.services import vector_service
 
 router = APIRouter(tags=["Search"])

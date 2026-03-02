@@ -227,7 +227,11 @@ else:
                 if res and res.status_code == 200:
                     suggestions = res.json()["suggestions"]
                     st.subheader("Results")
-                    st.json(suggestions)
+                    if not suggestions:
+                        st.info("No suggestions found.")
+                    for entry in suggestions:
+                        with st.expander(f"🌐 {entry['website']}", expanded=True):
+                            st.json(entry["fields"])
                 elif res:
                     st.error(f"Error: {res.text}")
 
